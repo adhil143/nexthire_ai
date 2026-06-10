@@ -31,3 +31,8 @@ export const logout = () => {
 export const getCurrentUserToken = () => {
   return localStorage.getItem('token');
 };
+
+export const getCurrentUser = async () => {
+  const response = await api.get('/auth/me');
+  return response.data;
+};

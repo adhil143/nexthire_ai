@@ -1,9 +1,105 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@100..900&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
+html {
+  scroll-behavior: smooth;
+}
+
 @layer base {
   body {
-    @apply bg-gradient-to-br from-indigo-50 via-white to-cyan-50 dark:from-slate-950 dark:via-slate-950 dark:to-slate-900 text-slate-900 dark:text-slate-100 transition-colors duration-300 min-h-screen;
+    font-family: 'Outfit', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    @apply min-h-screen text-slate-900 dark:text-slate-100 bg-[#fafafa] dark:bg-[#05060b] transition-colors duration-300;
+    overflow-x: hidden;
+  }
+
+  /* Custom Scrollbar for Glassmorphic styling */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgba(134, 39, 255, 0.15);
+    border-radius: 9999px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(134, 39, 255, 0.3);
   }
 }
+
+/* Glassmorphism Styles */
+.glass-panel {
+  @apply bg-white/60 dark:bg-[#0a0c16]/60 backdrop-blur-xl border border-slate-200/50 dark:border-white/10 shadow-xl dark:shadow-[0_0_50px_rgba(0,0,0,0.8)] rounded-2xl transition-all duration-300;
+}
+
+.glass-card {
+  @apply bg-white/70 dark:bg-[#0d1020]/75 backdrop-blur-xl border border-slate-200/40 dark:border-white/5 shadow-md hover:shadow-xl rounded-xl transition-all duration-300 hover:border-slate-300 dark:hover:border-purple-500/30;
+}
+
+.glass-navbar {
+  @apply bg-white/35 dark:bg-[#05060b]/35 backdrop-blur-xl border-b border-slate-200/30 dark:border-white/5 transition-all duration-300;
+}
+
+.glass-input {
+  @apply px-4 py-3 rounded-xl border border-slate-200 dark:border-white/10 bg-white/40 dark:bg-[#070914]/40 focus:outline-none focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500 text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 transition-all duration-200;
+}
+
+.glass-button {
+  @apply px-6 py-3 rounded-xl font-bold bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white shadow-lg shadow-purple-500/15 dark:shadow-purple-500/25 hover:shadow-purple-500/35 dark:hover:shadow-purple-500/45 border border-purple-400/20 active:scale-[0.98] transition-all duration-150 disabled:opacity-50 disabled:cursor-not-allowed;
+}
+
+.glass-button-secondary {
+  @apply px-6 py-3 rounded-xl font-bold bg-white/35 dark:bg-white/5 hover:bg-white/45 dark:hover:bg-white/10 border border-slate-200/50 dark:border-white/10 text-slate-700 dark:text-slate-200 transition-all duration-150 active:scale-[0.98];
+}
+
+.glass-button-danger {
+  @apply px-6 py-3 rounded-xl font-bold bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 text-white shadow-lg shadow-rose-500/15 dark:shadow-rose-500/25 hover:shadow-rose-500/30 dark:hover:shadow-rose-500/40 border border-rose-400/20 active:scale-[0.98] transition-all duration-150;
+}
+
+/* Animations */
+@keyframes infinite-scroll {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
+
+.animate-infinite-scroll {
+  animation: infinite-scroll 30s linear infinite;
+}
+
+/* Wave Sphere Animation (Voice Coach) */
+@keyframes wave-pulse {
+  0%, 100% {
+    transform: scale(1);
+    box-shadow: 0 0 40px rgba(168, 85, 247, 0.4), inset 0 0 30px rgba(168, 85, 247, 0.2);
+  }
+  50% {
+    transform: scale(1.08);
+    box-shadow: 0 0 60px rgba(6, 182, 212, 0.6), inset 0 0 40px rgba(6, 182, 212, 0.4);
+  }
+}
+
+.voice-wave-sphere {
+  animation: wave-pulse 4s infinite ease-in-out;
+  background: radial-gradient(circle, rgba(168, 85, 247, 0.15) 0%, rgba(6, 182, 212, 0.05) 50%, transparent 100%);
+  border: 2px solid rgba(168, 85, 247, 0.3);
+}
+
+.voice-wave-active {
+  animation: wave-pulse 1.8s infinite ease-in-out;
+  background: radial-gradient(circle, rgba(168, 85, 247, 0.25) 0%, rgba(6, 182, 212, 0.25) 60%, transparent 100%);
+  border: 2px solid rgba(6, 182, 212, 0.6);
+}
+
+/* Text Gradients */
+.text-gradient-primary {
+  @apply text-transparent bg-clip-text bg-gradient-to-r from-purple-600 via-indigo-600 to-cyan-600 dark:from-purple-400 dark:via-indigo-400 dark:to-cyan-400;
+}
+
+.text-gradient-purple {
+  @apply text-transparent bg-clip-text bg-gradient-to-r from-purple-500 via-fuchsia-500 to-pink-500;
+}

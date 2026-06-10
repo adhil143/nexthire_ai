@@ -94,13 +94,28 @@ def send_message(
     # Append user message
     chat_history.append({"role": "user", "content": message_in.message})
 
+    # Count how many questions the AI coach has asked so far
+    ai_questions_count = len([msg for msg in chat_history if msg['role'] == 'model'])
+
+    # Determine if we should end the interview
+    is_forced_end = "please end the interview" in message_in.message.lower() or "end of interview" in message_in.message.lower()
+
     # Prepare context for Gemini
-    # We use a standard generative model with prompt history
     prompt = f"You are an expert AI Interview Coach conducting an interview based on the following resume:\n\n{resume.content_text}\n\nHere is the interview history so far:\n"
     for msg in chat_history:
         prompt += f"{msg['role'].upper()}: {msg['content']}\n"
     
-    prompt += "\nAs the interviewer, provide short feedback on the candidate's last answer, and then ask the next interview question. Stay in character as the interviewer."
+    if ai_questions_count >= 10 or is_forced_end:
+        prompt += (
+            "\nThe interview is now complete. Do not ask any more questions. "
+            "Conclude the interview professionally and provide a comprehensive final evaluation report. "
+            "Your response MUST include the following sections and exact labels:\n"
+            "1) Final Score: [score]/100\n"
+            "2) Strengths: [list of strengths]\n"
+            "3) Evaluation Summary: [detailed constructive feedback]"
+        )
+    else:
+        prompt += "\nAs the interviewer, provide short feedback on the candidate's last answer, and then ask the next interview question. Stay in character as the interviewer."
 
     try:
         response = model.generate_content(prompt)

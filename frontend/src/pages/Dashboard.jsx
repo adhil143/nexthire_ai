@@ -1,35 +1,101 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
+import { useNavigate, Link } from 'react-router-dom';
 import api from '../services/api';
 import Navbar from '../components/Navbar';
 import { 
-  Upload, FileText, Loader2, Trash2, FileUp, 
+  Upload, FileText, Loader2, Trash2, 
   CheckCircle, AlertCircle, TrendingUp, Star, 
-  BarChart3, Activity, Award
+  BarChart3, Activity, Award, User, MessageSquare, Target, Map, Plus, ChevronRight, Sparkles
 } from 'lucide-react';
-import { 
-  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  BarChart, Bar
-} from 'recharts';
-import useDarkMode from '../hooks/useDarkMode';
+import { getCurrentUser, getCurrentUserToken } from '../services/auth';
+
+const RadialGauge = ({ value, label }) => {
+  const radius = 65;
+  const stroke = 6;
+  const normalizedRadius = radius - stroke * 2;
+  const circumference = normalizedRadius * 2 * Math.PI;
+  const strokeDashoffset = circumference - (value / 100) * circumference;
+
+  return (
+    <div className="flex flex-col items-center justify-center relative">
+      <svg height={radius * 2} width={radius * 2} className="transform -rotate-90 filter drop-shadow-[0_0_8px_rgba(168,85,247,0.3)]">
+        <circle
+          className="stroke-slate-200/50 dark:stroke-slate-800/40"
+          fill="transparent"
+          strokeWidth={stroke}
+          r={normalizedRadius}
+          cx={radius}
+          cy={radius}
+        />
+        <circle
+          stroke="url(#dashboardGaugeGrad)"
+          fill="transparent"
+          strokeWidth={stroke}
+          strokeDasharray={circumference + ' ' + circumference}
+          style={{ strokeDashoffset, transition: 'stroke-dashoffset 0.5s ease-in-out' }}
+          strokeLinecap="round"
+          r={normalizedRadius}
+          cx={radius}
+          cy={radius}
+        />
+        <defs>
+          <linearGradient id="dashboardGaugeGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stopColor="#a855f7" />
+            <stop offset="50%" stopColor="#6366f1" />
+            <stop offset="100%" stopColor="#06b6d4" />
+          </linearGradient>
+        </defs>
+      </svg>
+      <div className="absolute flex flex-col items-center justify-center">
+        <span className="text-2xl font-black text-slate-800 dark:text-white">{value}%</span>
+        <span className="text-[8px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest mt-0.5 text-center max-w-[80px]">
+          {label}
+        </span>
+      </div>
+    </div>
+  );
+};
 
 const Dashboard = () => {
-  const { theme } = useDarkMode();
+  const navigate = useNavigate();
+  
+  // Data States
   const [resumes, setResumes] = useState([]);
+  const [interviews, setInterviews] = useState([]);
+  const [roadmaps, setRoadmaps] = useState([]);
+  const [matches, setMatches] = useState([]);
+  const [user, setUser] = useState(null);
+  
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [dragActive, setDragActive] = useState(false);
+  
   const fileInputRef = useRef(null);
 
   useEffect(() => {
-    fetchResumes();
+    fetchDashboardData();
+    const token = getCurrentUserToken();
+    if (token) {
+      getCurrentUser()
+        .then((data) => setUser(data))
+        .catch((err) => console.error(err));
+    }
   }, []);
 
-  const fetchResumes = async () => {
+  const fetchDashboardData = async () => {
     try {
-      const response = await api.get('/resumes/');
-      setResumes(response.data);
+      const [resumesRes, interviewsRes, roadmapsRes, matchesRes] = await Promise.all([
+        api.get('/resumes/'),
+        api.get('/interviews/'),
+        api.get('/roadmaps/'),
+        api.get('/matcher/')
+      ]);
+      setResumes(resumesRes.data);
+      setInterviews(interviewsRes.data);
+      setRoadmaps(roadmapsRes.data);
+      setMatches(matchesRes.data);
     } catch (error) {
-      console.error('Failed to fetch resumes:', error);
+      console.error('Failed to fetch dashboard data:', error);
     } finally {
       setLoading(false);
     }
@@ -37,7 +103,6 @@ const Dashboard = () => {
 
   const validateAndUpload = async (file) => {
     if (!file) return;
-
     const validTypes = ['application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'text/plain'];
     const ext = file.name.split('.').pop().toLowerCase();
     
@@ -57,19 +122,16 @@ const Dashboard = () => {
 
     try {
       await api.post('/resumes/upload', formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
+        headers: { 'Content-Type': 'multipart/form-data' },
       });
-      fetchResumes();
+      const resumesRes = await api.get('/resumes/');
+      setResumes(resumesRes.data);
     } catch (error) {
       console.error('Failed to upload resume:', error);
       alert('Upload failed. Please try again.');
     } finally {
       setUploading(false);
-      if (fileInputRef.current) {
-        fileInputRef.current.value = '';
-      }
+      if (fileInputRef.current) fileInputRef.current.value = '';
     }
   };
 
@@ -103,317 +165,287 @@ const Dashboard = () => {
     if (!window.confirm('Are you sure you want to delete this resume?')) return;
     try {
       await api.delete(`/resumes/${id}`);
-      fetchResumes();
+      setResumes(resumes.filter(r => r.id !== id));
     } catch (error) {
       console.error('Failed to delete resume:', error);
     }
   };
 
-  // ---- Analytics Data Processing ----
+  // Process data for KPIs
   const parsedResumes = useMemo(() => {
     return resumes.map(r => {
       let data = {};
       try { data = JSON.parse(r.analysis_result); } catch (e) { /* ignore */ }
       return {
         ...r,
-        parsedData: {
-          ats_score: data.ats_score || 0,
-          skills: data.skills || [],
-          missing_keywords: data.missing_keywords || [],
-          improvement_suggestions: data.improvement_suggestions || [],
-          summary: data.summary || 'No summary available.'
-        }
+        ats_score: data.ats_score || 0,
       };
-    }).sort((a, b) => new Date(b.created_at) - new Date(a.created_at)); // Latest first
+    }).sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
   }, [resumes]);
 
-  const latestResume = parsedResumes[0];
-
-  const { avgScore, topSkillsData, scoreHistoryData } = useMemo(() => {
-    if (parsedResumes.length === 0) return { avgScore: 0, topSkillsData: [], scoreHistoryData: [] };
-
-    // Average Score
-    const totalScore = parsedResumes.reduce((sum, r) => sum + r.parsedData.ats_score, 0);
-    const avgScore = Math.round(totalScore / parsedResumes.length);
-
-    // Skills aggregation
-    const skillCounts = {};
-    parsedResumes.forEach(r => {
-      r.parsedData.skills.forEach(skill => {
-        const s = skill.trim().toLowerCase();
-        skillCounts[s] = (skillCounts[s] || 0) + 1;
-      });
-    });
-    const topSkillsData = Object.entries(skillCounts)
-      .map(([name, count]) => ({ name, count }))
-      .sort((a, b) => b.count - a.count)
-      .slice(0, 6); // Top 6 skills
-
-    // Score History (chronological order)
-    const scoreHistoryData = [...parsedResumes]
-      .reverse()
-      .map((r, index) => ({
-        name: `Res ${index + 1}`,
-        score: r.parsedData.ats_score,
-        date: new Date(r.created_at).toLocaleDateString()
-      }));
-
-    return { avgScore, topSkillsData, scoreHistoryData };
+  const avgScore = useMemo(() => {
+    if (parsedResumes.length === 0) return 0;
+    const totalScore = parsedResumes.reduce((sum, r) => sum + r.ats_score, 0);
+    return Math.round(totalScore / parsedResumes.length);
   }, [parsedResumes]);
 
-  const getScoreColor = (score) => {
-    if (score >= 80) return 'text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-900/50 border-emerald-200';
-    if (score >= 60) return 'text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-900/50 border-amber-200';
-    return 'text-rose-700 dark:text-rose-300 bg-rose-100 dark:bg-rose-900/50 border-rose-200';
-  };
+  // Latest Career Roadmap
+  const latestRoadmap = useMemo(() => {
+    if (roadmaps.length === 0) return null;
+    try {
+      const rm = roadmaps[0];
+      const parsedData = JSON.parse(rm.content_json);
+      return { ...rm, parsedData };
+    } catch (e) {
+      return null;
+    }
+  }, [roadmaps]);
+
+  // Recent activity list
+  const recentActivities = useMemo(() => {
+    const list = [];
+    interviews.slice(0, 2).forEach(item => {
+      list.push({
+        id: `int-${item.id}`,
+        title: `Mock Interview (Session #${item.id})`,
+        score: 85,
+        date: new Date(item.created_at),
+        type: 'interview'
+      });
+    });
+    matches.slice(0, 2).forEach(item => {
+      list.push({
+        id: `mat-${item.id}`,
+        title: `Resume Match (${item.job_title})`,
+        score: item.match_score,
+        date: new Date(item.created_at),
+        type: 'match'
+      });
+    });
+    return list.sort((a, b) => b.date - a.date).slice(0, 3);
+  }, [interviews, matches]);
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-white to-cyan-50 dark:from-slate-950 dark:via-slate-950 dark:to-slate-900 font-sans">
+    <div className="min-h-screen flex flex-col bg-[#05060b] text-slate-100 font-sans">
       <Navbar />
-      
-      <main className="max-w-7xl mx-auto py-8 sm:px-6 lg:px-8 space-y-6">
-        
-        {/* Header & Upload Bar */}
-        <div className="bg-white/70 backdrop-blur-xl dark:bg-slate-900/60 rounded-2xl shadow-sm border border-white/50 dark:border-white/10 p-6 flex flex-col md:flex-row items-center justify-between gap-6">
-          <div>
-            <h1 className="text-2xl font-bold text-slate-900 dark:text-white tracking-tight">Analytics Dashboard</h1>
-            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Track your resume improvements and AI insights.</p>
-          </div>
-          
-          <div 
-            className={`flex-grow md:max-w-md w-full flex justify-center px-4 py-4 border-2 border-dashed rounded-xl transition-colors ${
-              dragActive ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/30' : 'border-slate-300 dark:border-slate-700 bg-gradient-to-br from-indigo-50 via-white to-cyan-50 dark:from-slate-950 dark:via-slate-950 dark:to-slate-900 hover:bg-slate-100 dark:bg-slate-800'
-            } ${uploading ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
-            onDragEnter={handleDrag}
-            onDragLeave={handleDrag}
-            onDragOver={handleDrag}
-            onDrop={handleDrop}
-            onClick={() => !uploading && fileInputRef.current?.click()}
-          >
-            <div className="flex items-center space-x-3 text-center">
-              {uploading ? (
-                <Loader2 className="h-6 w-6 text-indigo-600 dark:text-indigo-400 animate-spin" />
-              ) : (
-                <FileUp className={`h-6 w-6 transition-colors ${dragActive ? 'text-indigo-600 dark:text-indigo-400' : 'text-slate-400'}`} />
-              )}
-              <div className="flex text-sm text-slate-600 dark:text-slate-400">
-                <span className="font-semibold text-indigo-600 hover:text-indigo-400">
-                  {uploading ? 'Analyzing...' : 'Upload new resume'}
-                </span>
-                <input type="file" ref={fileInputRef} onChange={handleFileUpload} className="sr-only" accept=".txt,.pdf,.docx" disabled={uploading} />
-              </div>
-            </div>
-          </div>
-        </div>
 
+      <main className="flex-grow max-w-6xl w-full mx-auto px-4 sm:px-6 py-10 flex flex-col justify-start space-y-8 z-10">
+        
         {loading ? (
-          <div className="flex justify-center items-center h-64">
-            <Loader2 className="animate-spin h-10 w-10 text-indigo-600 dark:text-indigo-400" />
-          </div>
-        ) : parsedResumes.length === 0 ? (
-          <div className="text-center bg-white/70 backdrop-blur-xl dark:bg-slate-900/60 rounded-2xl shadow-sm border border-white/50 dark:border-white/10 p-20">
-            <div className="mx-auto h-24 w-24 bg-indigo-50 dark:bg-indigo-900/30 rounded-full flex items-center justify-center mb-6">
-              <BarChart3 className="h-12 w-12 text-indigo-500 dark:text-indigo-400" />
-            </div>
-            <h3 className="text-xl font-bold text-slate-900 dark:text-white">No Analytics Available</h3>
-            <p className="mt-2 text-slate-500 dark:text-slate-400 max-w-sm mx-auto">Upload your first resume using the dropzone above to instantly generate your ATS score and skill insights!</p>
+          <div className="flex-grow flex items-center justify-center h-96">
+            <Loader2 className="w-10 h-10 animate-spin text-purple-500" />
           </div>
         ) : (
-          <>
-            {/* KPI Cards */}
-            <div className="grid grid-cols-1 gap-6 sm:grid-cols-3">
-              <div className="bg-white/70 backdrop-blur-xl dark:bg-slate-900/60 rounded-2xl p-6 shadow-sm border border-white/50 dark:border-white/10 flex items-center space-x-4">
-                <div className="h-12 w-12 bg-indigo-50 dark:bg-indigo-900/30 rounded-xl flex items-center justify-center">
-                  <FileText className="h-6 w-6 text-indigo-600 dark:text-indigo-400" />
+          <div className="space-y-8 animate-[fadeIn_0.5s_ease-out]">
+            
+            {/* Ambient Welcome Hero Banner */}
+            <div className="relative rounded-3xl border border-white/5 bg-gradient-to-r from-purple-950/15 via-[#0d1020]/90 to-cyan-950/10 p-8 sm:p-10 overflow-hidden shadow-2xl">
+              <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-purple-500 via-indigo-500 to-cyan-500"></div>
+              <div className="absolute right-0 top-0 w-80 h-80 bg-purple-500/10 rounded-full blur-[90px] -z-10"></div>
+              
+              <div className="flex flex-col md:flex-row items-center md:justify-between gap-6">
+                <div className="space-y-3 text-center md:text-left">
+                  <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full border border-purple-500/20 bg-purple-500/5 text-purple-400 font-bold text-[10px] uppercase tracking-wider">
+                    <Sparkles className="w-3 h-3" /> Command Center
+                  </div>
+                  <h2 className="text-3xl sm:text-4xl font-extrabold text-white tracking-tight capitalize">
+                    Welcome back, {user ? user.email.split('@')[0] : 'Professional'}
+                  </h2>
+                  <p className="text-slate-400 font-light max-w-xl text-sm leading-relaxed">
+                    Your readiness profile is configured. Use the AI coaches to optimize your resume keywords, practice mock questions, and check off learning goals.
+                  </p>
                 </div>
-                <div>
-                  <p className="text-sm font-medium text-slate-500 dark:text-slate-400">Total Uploads</p>
-                  <h4 className="text-2xl font-bold text-slate-900 dark:text-white">{parsedResumes.length}</h4>
-                </div>
-              </div>
-              <div className="bg-white/70 backdrop-blur-xl dark:bg-slate-900/60 rounded-2xl p-6 shadow-sm border border-white/50 dark:border-white/10 flex items-center space-x-4">
-                <div className="h-12 w-12 bg-emerald-50 dark:bg-emerald-900/30 rounded-xl flex items-center justify-center">
-                  <Activity className="h-6 w-6 text-emerald-600 dark:text-emerald-400" />
-                </div>
-                <div>
-                  <p className="text-sm font-medium text-slate-500 dark:text-slate-400">Average ATS Score</p>
-                  <h4 className="text-2xl font-bold text-slate-900 dark:text-white">{avgScore}%</h4>
-                </div>
-              </div>
-              <div className="bg-white/70 backdrop-blur-xl dark:bg-slate-900/60 rounded-2xl p-6 shadow-sm border border-white/50 dark:border-white/10 flex items-center space-x-4">
-                <div className="h-12 w-12 bg-amber-50 dark:bg-amber-900/30 rounded-xl flex items-center justify-center">
-                  <Award className="h-6 w-6 text-amber-600 dark:text-amber-400" />
-                </div>
-                <div>
-                  <p className="text-sm font-medium text-slate-500 dark:text-slate-400">Latest Score</p>
-                  <h4 className="text-2xl font-bold text-slate-900 dark:text-white">{latestResume.parsedData.ats_score}%</h4>
+                
+                <div className="flex items-center space-x-6 shrink-0">
+                  <div className="text-center bg-white/5 border border-white/5 rounded-2xl p-4 min-w-[100px] backdrop-blur-sm">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-0.5">Interviews</span>
+                    <span className="text-3xl font-black text-white">{interviews.length}</span>
+                  </div>
+                  <div className="text-center bg-white/5 border border-white/5 rounded-2xl p-4 min-w-[100px] backdrop-blur-sm">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-0.5">Matches</span>
+                    <span className="text-3xl font-black text-white">{matches.length}</span>
+                  </div>
                 </div>
               </div>
             </div>
 
-            {/* Charts Row */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {/* Line Chart */}
-              <div className="bg-white/70 backdrop-blur-xl dark:bg-slate-900/60 rounded-2xl p-6 shadow-sm border border-white/50 dark:border-white/10">
-                <h3 className="text-base font-semibold text-slate-900 dark:text-white mb-6 flex items-center">
-                  <TrendingUp className="w-5 h-5 mr-2 text-indigo-500 dark:text-indigo-400" /> ATS Score Trend
-                </h3>
-                <div className="h-64 w-full">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={scoreHistoryData}>
-                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={theme === 'dark' ? '#334155' : '#e2e8f0'} />
-                      <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fill: theme === 'dark' ? '#94a3b8' : '#64748b', fontSize: 12}} dy={10} />
-                      <YAxis domain={[0, 100]} axisLine={false} tickLine={false} tick={{fill: theme === 'dark' ? '#94a3b8' : '#64748b', fontSize: 12}} dx={-10} />
-                      <Tooltip 
-                        contentStyle={{ 
-                          borderRadius: '12px', 
-                          border: theme === 'dark' ? '1px solid rgba(255,255,255,0.1)' : '1px solid rgba(0,0,0,0.05)', 
-                          boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)',
-                          backgroundColor: theme === 'dark' ? 'rgba(15, 23, 42, 0.9)' : 'rgba(255, 255, 255, 0.9)', 
-                          color: theme === 'dark' ? '#f8fafc' : '#0f172a' 
-                        }}
-                        itemStyle={{ color: '#6366f1' }}
-                        labelStyle={{ color: theme === 'dark' ? '#94a3b8' : '#64748b', marginBottom: '4px' }}
-                      />
-                      <Line type="monotone" dataKey="score" stroke="#6366f1" strokeWidth={3} dot={{ r: 4, fill: '#6366f1', strokeWidth: 2, stroke: theme === 'dark' ? '#0f172a' : '#fff' }} activeDot={{ r: 6 }} />
-                    </LineChart>
-                  </ResponsiveContainer>
+            {/* Spacious Staggered Grid */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+              
+              {/* Column 1: Analytics & ATS gauge */}
+              <div className="glass-panel p-6 flex flex-col justify-between space-y-6">
+                <div>
+                  <h3 className="text-xs font-extrabold uppercase tracking-widest text-slate-400 mb-6 flex items-center">
+                    <Award className="w-4 h-4 mr-2 text-purple-400" /> ATS Compatibility
+                  </h3>
+                  <div className="py-6 flex justify-center">
+                    <RadialGauge value={avgScore} label="Avg Score" />
+                  </div>
                 </div>
-              </div>
-
-              {/* Top Skills List */}
-              <div className="bg-white/70 backdrop-blur-xl dark:bg-slate-900/60 rounded-2xl p-6 shadow-sm border border-white/50 dark:border-white/10 flex flex-col">
-                <h3 className="text-base font-semibold text-slate-900 dark:text-white mb-4 flex items-center">
-                  <BarChart3 className="w-5 h-5 mr-2 text-indigo-500 dark:text-indigo-400" /> Top Extracted Skills
-                </h3>
-                <div className="flex-grow flex flex-col justify-center space-y-3">
-                  {topSkillsData.length === 0 ? (
-                    <p className="text-slate-500 dark:text-slate-400 text-sm text-center">No skills extracted yet.</p>
+                <div className="bg-white/5 border border-white/5 rounded-xl p-4 text-xs text-slate-400 leading-normal">
+                  <p className="font-semibold text-slate-300 mb-1">ATS Profile Status</p>
+                  {parsedResumes.length > 0 ? (
+                    <span>Based on your latest upload: <strong className="text-white">{parsedResumes[0].filename}</strong>. Keep skills updated to boost scores.</span>
                   ) : (
-                    topSkillsData.map((skill, index) => {
-                      // Calculate percentage for a subtle background bar effect
-                      const maxCount = topSkillsData[0].count;
-                      const percentage = Math.round((skill.count / maxCount) * 100);
-                      
-                      return (
-                        <div key={index} className="relative w-full bg-gradient-to-br from-indigo-50 via-white to-cyan-50 dark:from-slate-950 dark:via-slate-950 dark:to-slate-900 rounded-xl overflow-hidden border border-slate-100 dark:border-slate-800 flex items-center justify-between p-3 z-0">
-                          {/* Progress Bar Background */}
-                          <div 
-                            className="absolute top-0 left-0 h-full bg-indigo-50 dark:bg-indigo-900/30/80 -z-10 rounded-xl transition-all duration-500"
-                            style={{ width: `${percentage}%` }}
-                          ></div>
-                          
-                          <span className="font-semibold text-slate-700 dark:text-slate-300 capitalize text-sm">{skill.name}</span>
-                          <span className="bg-white/70 backdrop-blur-xl dark:bg-slate-900/60 text-indigo-600 dark:text-indigo-400 border border-indigo-100 text-xs font-bold px-2.5 py-1 rounded-md shadow-sm">
-                            {skill.count} {skill.count === 1 ? 'mention' : 'mentions'}
-                          </span>
-                        </div>
-                      );
-                    })
+                    <span>No resumes uploaded yet. Upload your CV below to generate a baseline.</span>
                   )}
                 </div>
               </div>
-            </div>
 
-            {/* Bottom Row: Latest Resume Insights & History */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              
-              {/* Latest Resume Insights */}
-              <div className="lg:col-span-2 bg-white/70 backdrop-blur-xl dark:bg-slate-900/60 rounded-2xl shadow-sm border border-white/50 dark:border-white/10 overflow-hidden flex flex-col">
-                <div className="p-6 border-b border-slate-100 dark:border-slate-800 bg-gradient-to-br from-indigo-50 via-white to-cyan-50 dark:from-slate-950 dark:via-slate-950 dark:to-slate-900 flex justify-between items-center">
-                  <div>
-                    <h3 className="text-lg font-bold text-slate-900 dark:text-white">Latest Resume Insights</h3>
-                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">{latestResume.filename} • {new Date(latestResume.created_at).toLocaleString()}</p>
+              {/* Column 2: Recent Activity Timeline */}
+              <div className="glass-panel p-6 flex flex-col justify-between space-y-6">
+                <div>
+                  <h3 className="text-xs font-extrabold uppercase tracking-widest text-slate-400 mb-6 flex items-center">
+                    <Activity className="w-4 h-4 mr-2 text-indigo-400" /> Activity Log
+                  </h3>
+                  
+                  {recentActivities.length === 0 ? (
+                    <div className="text-center py-12 text-slate-500 italic text-xs">
+                      No activities yet. Start a session or check compatibility to log events.
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      {recentActivities.map((act) => (
+                        <div key={act.id} className="p-3 bg-white/5 border border-white/5 rounded-xl hover:border-purple-500/20 transition-all space-y-2">
+                          <div className="flex justify-between items-center text-xs">
+                            <span className="font-bold text-slate-200 truncate max-w-[160px]" title={act.title}>{act.title}</span>
+                            <span className="font-mono font-bold text-purple-400">{act.score}%</span>
+                          </div>
+                          <div className="w-full bg-slate-800/60 h-1.5 rounded-full overflow-hidden">
+                            <div 
+                              className="bg-gradient-to-r from-purple-500 to-indigo-500 h-full rounded-full" 
+                              style={{ width: `${act.score}%` }}
+                            />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                
+                <div className="border-t border-white/5 pt-4 flex justify-between items-center text-xs">
+                  <span className="text-slate-400">Speech & CV Analytics</span>
+                  <Link to="/voice-coach" className="text-purple-400 font-bold hover:underline flex items-center group">
+                    <span>Practice Coach</span>
+                    <ChevronRight className="w-3.5 h-3.5 ml-0.5 group-hover:translate-x-0.5 transition-transform" />
+                  </Link>
+                </div>
+              </div>
+
+              {/* Column 3: Roadmap Progress Card */}
+              <div className="glass-panel p-6 flex flex-col justify-between space-y-6">
+                <div className="space-y-4">
+                  <h3 className="text-xs font-extrabold uppercase tracking-widest text-slate-400 flex items-center">
+                    <Map className="w-4 h-4 mr-2 text-cyan-400" /> Roadmap Tracker
+                  </h3>
+                  <div className="space-y-1">
+                    <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Target Role</span>
+                    <span className="text-xl font-extrabold text-white leading-tight block truncate">
+                      {latestRoadmap ? latestRoadmap.target_role : "AI Lead Specialist"}
+                    </span>
                   </div>
-                  <div className={`px-4 py-1.5 text-lg font-bold rounded-full border shadow-sm ${getScoreColor(latestResume.parsedData.ats_score)}`}>
-                    {latestResume.parsedData.ats_score}% ATS
+                  
+                  {/* Progress Bar */}
+                  <div className="space-y-1.5 pt-2">
+                    <div className="flex justify-between text-xs font-bold font-mono text-purple-400">
+                      <span>Completion</span>
+                      <span>65%</span>
+                    </div>
+                    <div className="w-full bg-slate-800/60 h-2 rounded-full overflow-hidden">
+                      <div className="bg-gradient-to-r from-purple-500 to-cyan-500 h-full rounded-full" style={{ width: '65%' }} />
+                    </div>
                   </div>
                 </div>
                 
-                <div className="p-6 space-y-6 flex-grow">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div>
-                      <h5 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 flex items-center">
-                        <CheckCircle className="w-4 h-4 mr-1.5 text-indigo-500 dark:text-indigo-400" /> Skills Found
-                      </h5>
-                      <div className="flex flex-wrap gap-2">
-                        {latestResume.parsedData.skills.map((skill, i) => (
-                          <span key={i} className="px-3 py-1 text-xs font-semibold bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 rounded-full border border-indigo-100">
-                            {skill}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                    <div>
-                      <h5 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 flex items-center">
-                        <AlertCircle className="w-4 h-4 mr-1.5 text-rose-500 dark:text-rose-400" /> Missing Keywords
-                      </h5>
-                      <div className="flex flex-wrap gap-2">
-                        {latestResume.parsedData.missing_keywords.map((kw, i) => (
-                          <span key={i} className="px-3 py-1 text-xs font-semibold bg-rose-50 dark:bg-rose-900/30 text-rose-700 dark:text-rose-300 rounded-full border border-rose-100">
-                            {kw}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
+                <button 
+                  onClick={() => navigate('/voice-coach')}
+                  className="glass-button w-full flex items-center justify-center py-3 text-xs shadow-lg shadow-purple-500/10"
+                >
+                  <Plus className="w-4 h-4 mr-1.5" /> Start New Session
+                </button>
+              </div>
 
-                  <div>
-                    <h5 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 flex items-center">
-                      <TrendingUp className="w-4 h-4 mr-1.5 text-emerald-500" /> Suggestions for Improvement
-                    </h5>
-                    <ul className="text-sm text-slate-700 dark:text-slate-300 space-y-2 pl-6 list-disc marker:text-emerald-400">
-                      {latestResume.parsedData.improvement_suggestions.map((sugg, i) => (
-                        <li key={i} className="leading-relaxed">{sugg}</li>
-                      ))}
-                    </ul>
-                  </div>
+            </div>
 
-                  <div className="pt-4 border-t border-slate-100 dark:border-slate-800">
-                     <p className="text-sm text-slate-600 dark:text-slate-400 italic bg-gradient-to-br from-indigo-50 via-white to-cyan-50 dark:from-slate-950 dark:via-slate-950 dark:to-slate-900 p-4 rounded-xl border border-slate-100 dark:border-slate-800">
-                       "{latestResume.parsedData.summary}"
-                     </p>
-                  </div>
+            {/* Resume Upload & History Manager (Sleek Bottom Section) */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+              
+              {/* Drag/Drop Zone Card (Spans 1 Column) */}
+              <div className="glass-panel p-6 flex flex-col justify-between space-y-4">
+                <h3 className="text-xs font-extrabold uppercase tracking-widest text-slate-400 flex items-center">
+                  <Upload className="w-4 h-4 mr-2 text-purple-400" /> Add Resume
+                </h3>
+                
+                <div 
+                  className={`flex-grow flex flex-col items-center justify-center py-10 px-4 border-2 border-dashed rounded-xl transition-all ${
+                    dragActive ? 'border-purple-500 bg-purple-500/5' : 'border-white/10 hover:bg-white/5 hover:border-purple-500/30'
+                  } cursor-pointer`}
+                  onDragEnter={handleDrag}
+                  onDragLeave={handleDrag}
+                  onDragOver={handleDrag}
+                  onDrop={handleDrop}
+                  onClick={() => !uploading && fileInputRef.current?.click()}
+                >
+                  {uploading ? (
+                    <Loader2 className="w-8 h-8 animate-spin text-purple-400 mb-3" />
+                  ) : (
+                    <Upload className="w-8 h-8 text-purple-400 mb-3" />
+                  )}
+                  <span className="text-xs font-bold text-slate-200 text-center">
+                    {uploading ? 'Analyzing Resume...' : 'Drop resume file or browse'}
+                  </span>
+                  <span className="text-[10px] text-slate-500 mt-1">PDF, DOCX, TXT (Max 5MB)</span>
+                  <input type="file" ref={fileInputRef} onChange={handleFileUpload} className="sr-only" accept=".txt,.pdf,.docx" disabled={uploading} />
                 </div>
               </div>
 
-              {/* Upload History List */}
-              <div className="bg-white/70 backdrop-blur-xl dark:bg-slate-900/60 rounded-2xl shadow-sm border border-white/50 dark:border-white/10 overflow-hidden flex flex-col h-[600px]">
-                <div className="p-5 border-b border-slate-100 dark:border-slate-800">
-                  <h3 className="text-base font-bold text-slate-900 dark:text-white">Upload History</h3>
-                </div>
-                <div className="overflow-y-auto flex-grow p-2">
-                  <div className="space-y-1">
-                    {parsedResumes.map((resume) => (
-                      <div key={resume.id} className="flex items-center justify-between p-3 hover:bg-gradient-to-br from-indigo-50 via-white to-cyan-50 dark:from-slate-950 dark:via-slate-950 dark:to-slate-900 rounded-xl transition-colors group">
-                        <div className="flex items-center min-w-0 pr-3">
-                          <div className={`h-10 w-10 rounded-full flex items-center justify-center font-bold text-xs mr-3 flex-shrink-0 ${getScoreColor(resume.parsedData.ats_score)}`}>
-                            {resume.parsedData.ats_score}
+              {/* Upload History List (Spans 2 Columns) */}
+              <div className="glass-panel p-6 lg:col-span-2 flex flex-col justify-between space-y-4">
+                <h3 className="text-xs font-extrabold uppercase tracking-widest text-slate-400 flex items-center justify-between">
+                  <span className="flex items-center"><FileText className="w-4 h-4 mr-2 text-indigo-400" /> Document Archive</span>
+                  <span className="bg-purple-500/10 text-purple-400 px-2 py-0.5 rounded-md text-[10px] font-bold">
+                    {resumes.length} {resumes.length === 1 ? 'document' : 'documents'}
+                  </span>
+                </h3>
+
+                <div className="flex-grow overflow-y-auto max-h-48 pr-1">
+                  {parsedResumes.length === 0 ? (
+                    <div className="h-full flex items-center justify-center text-slate-500 italic text-xs py-10">
+                      No files uploaded. Drop a file on the left to begin.
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      {parsedResumes.map((r) => (
+                        <div key={r.id} className="glass-card p-4 flex items-center justify-between group hover:border-purple-500/30">
+                          <div className="flex items-center min-w-0 pr-2">
+                            <FileText className="w-8 h-8 text-purple-400 mr-3 shrink-0" />
+                            <div className="min-w-0">
+                              <p className="text-xs font-bold truncate text-slate-200" title={r.filename}>{r.filename}</p>
+                              <p className="text-[9px] text-slate-500">{new Date(r.created_at).toLocaleDateString()}</p>
+                            </div>
                           </div>
-                          <div className="min-w-0">
-                            <p className="text-sm font-semibold text-slate-900 dark:text-white truncate" title={resume.filename}>
-                              {resume.filename}
-                            </p>
-                            <p className="text-xs text-slate-500 dark:text-slate-400 truncate">
-                              {new Date(resume.created_at).toLocaleDateString()}
-                            </p>
+                          <div className="flex items-center space-x-2 shrink-0">
+                            <span className="text-[10px] font-mono font-bold bg-purple-500/10 text-purple-400 px-2 py-0.5 rounded-md">
+                              {r.ats_score}%
+                            </span>
+                            <button
+                              onClick={() => handleDelete(r.id)}
+                              className="text-slate-500 hover:text-rose-500 p-1.5 rounded-md hover:bg-rose-500/10 transition-colors"
+                              title="Delete document"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
                           </div>
                         </div>
-                        <button
-                          onClick={() => handleDelete(resume.id)}
-                          className="text-slate-300 hover:text-rose-500 dark:text-rose-400 p-2 rounded-lg hover:bg-rose-50 dark:bg-rose-900/30 transition-colors opacity-0 group-hover:opacity-100"
-                          title="Delete"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
 
             </div>
-          </>
+
+          </div>
         )}
       </main>
     </div>
